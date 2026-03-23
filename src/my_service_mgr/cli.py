@@ -1,10 +1,63 @@
 from __future__ import annotations
 
+import argparse
+import sys
+from pathlib import Path
+
+from .manager import ServiceManager
+from .tui import run_tui
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(prog="my-service-mgr", description="Manage systemd services from templates.")
+    p.add_argument(
+        "--services-dir",
+        type=Path,
+        default=Path.cwd() / "services",
+        help="Directory containing *.service templates (default: ./services)",
+    )
+    p.add_argument(
+        "--scripts-dir",
+        type=Path,
+        default=Path.cwd() / "scripts",
+        help="Directory containing scripts referenced by the services (default: ./scripts)",
+    )
+    p.add_argument("--dry-run", action="store_true", help="Show what would happen, but don't modify the system.")
+    p.add_argument("--list", action="store_true", help="List available service templates and installed status.")
+    p.add_argument("--enable", metavar="SERVICE_UNIT", help="Enable/add a service unit non-interactively.")
+    p.add_argument("--disable", metavar="SERVICE_UNIT", help="Disable/remove a service unit non-interactively.")
+    return p
+
 
 def main(argv: list[str] | None = None) -> int:
-    # Basic "hello world" entrypoint. `argv` is reserved for future CLI args.
-    _ = argv
-    print("hello world")
+    args = _build_parser().parse_args(argv)
+
+    manager = ServiceManager(
+        services_dir=args.services_dir,
+        scripts_dir=args.scripts_dir,
+        dry_run=args.dry_run,
+    )
+
+    if args.list:
+        rows = manager.list_service_templates_with_status()
+        for row in rows:
+            # Keep this output stable for scripting.
+            print(f"{row['unit_name']}\t{row['state']}\t{row['enabled']}\t{row['active']}")
+        return 0
+
+    if args.enable:
+        manager.enable_by_unit_name(args.enable)
+        return 0
+
+    if args.disable:
+        manager.disable_by_unit_name(args.disable)
+        return 0
+
+    if not sys.stdout.isatty():
+        print("No TTY detected. Use --list / --enable / --disable for non-interactive usage.", file=sys.stderr)
+        return 2
+
+    run_tui(manager)
     return 0
 
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Dummy Beta Service (managed by my-service-mgr)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=__SCRIPT_PATH__
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=default.target
+
