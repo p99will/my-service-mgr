@@ -51,3 +51,12 @@ Dry-run mode (prints what it would do):
 python3 -m my_service_mgr --dry-run --enable dummy-alpha.service
 ```
 
+Logs:
+- The app writes detailed action logs (including systemctl stdout/stderr on failure) to:
+  - `~/.local/state/my-service-mgr/logs/my-service-mgr.log`
+  - If that path is not writable, it falls back to `./my-service-mgr.log`.
+
+System vs user mode:
+- By default (`--mode auto`), root installs to system units; non-root installs to user units.
+- You can force it with `--mode system` (requires `sudo`) or `--mode user`.
+

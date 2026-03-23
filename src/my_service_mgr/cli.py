@@ -23,6 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory containing scripts referenced by the services (default: ./scripts)",
     )
     p.add_argument("--dry-run", action="store_true", help="Show what would happen, but don't modify the system.")
+    p.add_argument("--mode", choices=["auto", "system", "user"], default="auto", help="Select systemd unit installation mode.")
     p.add_argument("--list", action="store_true", help="List available service templates and installed status.")
     p.add_argument("--enable", metavar="SERVICE_UNIT", help="Enable/add a service unit non-interactively.")
     p.add_argument("--disable", metavar="SERVICE_UNIT", help="Disable/remove a service unit non-interactively.")
@@ -32,11 +33,16 @@ def _build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
-    manager = ServiceManager(
-        services_dir=args.services_dir,
-        scripts_dir=args.scripts_dir,
-        dry_run=args.dry_run,
-    )
+    try:
+        manager = ServiceManager(
+            services_dir=args.services_dir,
+            scripts_dir=args.scripts_dir,
+            mode=args.mode,
+            dry_run=args.dry_run,
+        )
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        return 1
 
     if args.list:
         rows = manager.list_service_templates_with_status()
@@ -46,12 +52,32 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if args.enable:
-        manager.enable_by_unit_name(args.enable)
-        return 0
+        try:
+            result = manager.enable_by_unit_name(args.enable)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        if result.ok:
+            print(result.message)
+            return 0
+        print(result.message, file=sys.stderr)
+        if result.error:
+            print(result.error, file=sys.stderr)
+        return 1
 
     if args.disable:
-        manager.disable_by_unit_name(args.disable)
-        return 0
+        try:
+            result = manager.disable_by_unit_name(args.disable)
+        except Exception as e:
+            print(f"Error: {e}", file=sys.stderr)
+            return 1
+        if result.ok:
+            print(result.message)
+            return 0
+        print(result.message, file=sys.stderr)
+        if result.error:
+            print(result.error, file=sys.stderr)
+        return 1
 
     if not sys.stdout.isatty():
         print("No TTY detected. Use --list / --enable / --disable for non-interactive usage.", file=sys.stderr)

@@ -6,16 +6,25 @@ from typing import Any
 from .manager import ServiceManager
 
 
+def _truncate_ascii(s: str, max_len: int) -> str:
+    if max_len <= 0:
+        return ""
+    if len(s) <= max_len:
+        return s
+    if max_len <= 3:
+        return s[:max_len]
+    return s[: max_len - 3] + "..."
+
+
 def _draw_screen(stdscr: Any, manager: ServiceManager, services: list[dict[str, str]], selected: int, message: str) -> None:
     stdscr.erase()
     h, w = stdscr.getmaxyx()
 
-    title = "my-service-mgr (arrows to select, Enter to toggle, q to quit)"
+    title = "my-service-mgr (arrows select, Space/Enter toggle, q quit)"
     stdscr.addnstr(0, 0, title, w - 1, curses.A_BOLD)
 
     start_row = 2
     max_rows = h - start_row - 2
-
     if max_rows < 1:
         stdscr.refresh()
         return
@@ -23,46 +32,52 @@ def _draw_screen(stdscr: Any, manager: ServiceManager, services: list[dict[str, 
     offset = 0
     if selected >= max_rows:
         offset = selected - max_rows + 1
-
     visible = services[offset : offset + max_rows]
+
+    # Simple table layout (fixed columns + truncation).
+    # Keep status at a fixed right edge to align rows.
+    status_width = 9
+    checkbox_width = 4  # "[x]"
+    name_width = 26
+    inner_width = max(0, w - 1)
+    status_draw_width = min(status_width, inner_width)
+    status_start_x = max(0, inner_width - status_draw_width)
+    name_start_x = checkbox_width + 1
+    max_name_width = max(0, status_start_x - name_start_x - 1)  # 1 for space between name/desc
+    name_draw_width = min(name_width, max_name_width)
+    desc_start_x = name_start_x + name_draw_width + 1
+    desc_draw_width = max(0, status_start_x - desc_start_x)
 
     for i, row in enumerate(visible):
         idx = offset + i
         unit_name = row["unit_name"]
-        description = row.get("description", "")
-        state = row["state"]
-        enabled = row["enabled"]
-        active = row["active"]
+        description = row.get("description", "") or ""
+        enabled = row.get("enabled", "disabled")
 
-        col = 0
-        width = max(0, w - 1)
+        is_enabled = enabled == "enabled"
+        checkbox_str = "[x]" if is_enabled else "[ ]"
+        status_str = "enabled" if is_enabled else ("disabled" if enabled != "unknown" else "unknown")
+
         main_attr = curses.A_REVERSE if idx == selected else curses.A_NORMAL
         dim_attr = (curses.A_REVERSE if idx == selected else curses.A_NORMAL) | curses.A_DIM
 
-        unit_name_str = unit_name
-        if len(unit_name_str) > width:
-            unit_name_str = unit_name_str[: max(0, width - 4)] + "..."
+        row_y = start_row + i
+        stdscr.addnstr(row_y, 0, checkbox_str, checkbox_width, main_attr)
 
-        stdscr.addnstr(start_row + i, col, unit_name_str, width - col, main_attr)
-        col += min(len(unit_name_str), width - col) + 1  # +1 for spacing
-        if col >= width:
-            continue
+        if name_draw_width > 0:
+            name_str = _truncate_ascii(unit_name, name_draw_width)
+            stdscr.addnstr(row_y, name_start_x, name_str.ljust(name_draw_width), name_draw_width, main_attr)
 
-        desc_str = description or ""
-        remaining = width - col
-        if len(desc_str) > remaining:
-            desc_str = desc_str[: max(0, remaining - 4)] + "..."
-        stdscr.addnstr(start_row + i, col, desc_str, width - col, dim_attr)
-        col += min(len(desc_str), width - col)
-        if col < width:
-            # Keep the rest of the status info readable.
-            status_str = f"  {state} enabled={enabled} active={active}"
-            if len(status_str) > width - col:
-                status_str = status_str[: max(0, width - col - 1)] + "..."
-            stdscr.addnstr(start_row + i, col, status_str, width - col, main_attr)
+        if desc_draw_width > 0:
+            desc_str = _truncate_ascii(description, desc_draw_width)
+            stdscr.addnstr(row_y, desc_start_x, desc_str, desc_draw_width, dim_attr)
 
-    help_line = "Enter: enable/add if disabled, remove/disable if enabled"
-    stdscr.addnstr(h - 2, 0, help_line[: w - 1], w - 1, curses.A_DIM)
+        if status_draw_width > 0:
+            status_text = _truncate_ascii(status_str, status_draw_width).rjust(status_draw_width)
+            stdscr.addnstr(row_y, status_start_x, status_text, status_draw_width, main_attr)
+
+    help_line = "Space/Enter: toggle enabled checkbox  q: quit"
+    stdscr.addnstr(h - 2, 0, _truncate_ascii(help_line, w - 1), w - 1, curses.A_DIM)
 
     msg = message[: w - 1]
     stdscr.addnstr(h - 1, 0, msg, w - 1, curses.A_BOLD if "Error:" in msg else curses.A_NORMAL)
@@ -72,16 +87,14 @@ def _draw_screen(stdscr: Any, manager: ServiceManager, services: list[dict[str, 
 def _toggle_selected(manager: ServiceManager, services: list[dict[str, str]], selected: int) -> str:
     row = services[selected]
     unit_name = row["unit_name"]
-    enabled = row["enabled"]
-
-    # Treat "enabled" as installed+enabled; everything else falls back to enable.
     try:
-        if enabled == "enabled":
-            manager.disable_by_unit_name(unit_name)
-            return f"Disabled {unit_name}"
+        enabled = row.get("enabled", "disabled")
+        is_enabled = enabled == "enabled"
+        if is_enabled:
+            result = manager.disable_by_unit_name(unit_name)
         else:
-            manager.enable_by_unit_name(unit_name)
-            return f"Enabled {unit_name}"
+            result = manager.enable_by_unit_name(unit_name)
+        return result.message
     except Exception as e:
         return f"Error: {e}"
 
@@ -92,6 +105,7 @@ def run_tui(manager: ServiceManager) -> None:
         raise RuntimeError("No *.service templates found in services directory.")
 
     def _curses_main(stdscr: Any) -> None:
+        nonlocal services
         curses.curs_set(0)
         stdscr.keypad(True)
         selected = 0
@@ -108,12 +122,14 @@ def run_tui(manager: ServiceManager) -> None:
                 selected = max(0, selected - 1)
             elif key == curses.KEY_DOWN:
                 selected = min(len(services) - 1, selected + 1)
-            elif key in (curses.KEY_ENTER, 10, 13):
+            elif key in (curses.KEY_ENTER, 10, 13, ord(" ")):
                 # Show a quick message while the operation runs.
                 _draw_screen(stdscr, manager, services, selected=selected, message="Working...")
                 stdscr.refresh()
                 message = _toggle_selected(manager, services, selected)
                 services = manager.list_service_templates_with_status()
+                if services:
+                    selected = min(selected, len(services) - 1)
 
     curses.wrapper(_curses_main)
 
