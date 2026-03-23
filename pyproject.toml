@@ -8,14 +8,23 @@ version = "0.1.0"
 description = "Manage custom services and scripts on Linux (Pop!_OS)."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
-authors = [{ name = "TODO" }]
+license = { file = "LICENSE" }
+authors = [{ name = "p99will" }]
+keywords = ["linux", "systemd", "services", "automation", "pop-os"]
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: MIT License",
+  "Intended Audience :: Developers",
+  "Environment :: Console",
+  "Topic :: System :: Systems Administration",
   "Operating System :: OS Independent",
+  "Operating System :: POSIX :: Linux",
 ]
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/p99will/my-service-mgr"
+Repository = "https://github.com/p99will/my-service-mgr"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

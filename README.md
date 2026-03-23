@@ -2,6 +2,10 @@
 
 Manage custom services and scripts on Linux (Pop!_OS).
 
+## License
+
+MIT (see `LICENSE`).
+
 ## Install (editable)
 
 ```bash
