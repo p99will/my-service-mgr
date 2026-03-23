@@ -22,8 +22,32 @@ python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 ```
 
 ## Project layout
-
 - `src/my_service_mgr/`: Python package code
 - `scripts/`: helper scripts you want to keep in-repo
 - `services/`: future service unit templates / artifacts
+
+## Usage
+
+From the repo root, run the arrow-based TUI (requires a TTY):
+```bash
+python3 -m my_service_mgr
+```
+
+Non-interactive helpers:
+```bash
+python3 -m my_service_mgr --list
+python3 -m my_service_mgr --enable dummy-alpha.service
+python3 -m my_service_mgr --disable dummy-alpha.service
+```
+
+Service template convention:
+- Put `*.service` files in `services/`.
+- Put the executable script in `scripts/` with the same stem name:
+  - `services/dummy-alpha.service` -> `scripts/dummy-alpha.sh` (or `scripts/dummy-alpha`)
+- In the `.service` template, include the placeholder `__SCRIPT_PATH__` (it will be replaced with the installed script path).
+
+Dry-run mode (prints what it would do):
+```bash
+python3 -m my_service_mgr --dry-run --enable dummy-alpha.service
+```
 
