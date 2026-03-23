@@ -32,3 +32,6 @@ package-dir = { "" = "src" }
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[project.scripts]
+my-service-mgr = "my_service_mgr.cli:main"
+
