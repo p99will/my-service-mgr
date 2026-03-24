@@ -92,6 +92,36 @@ class ServiceManagerExistingServicesTests(unittest.TestCase):
         self.assertIn("demo.service [user]", result.message)
         self.assertIn("description=Demo Service", result.message)
 
+    def test_system_mode_manager_initializes_without_root(self) -> None:
+        with patch("my_service_mgr.manager.os.geteuid", return_value=1000):
+            manager = ServiceManager(
+                services_dir=Path(self.tmpdir.name) / "services",
+                scripts_dir=Path(self.tmpdir.name) / "scripts",
+                mode="system",
+                dry_run=False,
+            )
+
+        self.assertEqual("system", manager.template_scope)
+
+    def test_enable_existing_unit_system_scope_uses_sudo(self) -> None:
+        manager = ServiceManager(
+            services_dir=Path(self.tmpdir.name) / "services",
+            scripts_dir=Path(self.tmpdir.name) / "scripts",
+            dry_run=False,
+        )
+        responses = [
+            CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="enabled\n", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="active\n", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="Demo Service\n", stderr=""),
+        ]
+        with patch("my_service_mgr.manager.os.geteuid", return_value=1000):
+            with patch("my_service_mgr.manager._run", side_effect=responses) as mocked_run:
+                result = manager.enable_existing_unit("demo", "system")
+
+        self.assertTrue(result.ok)
+        self.assertTrue(mocked_run.call_args_list[0].kwargs["use_sudo"])
+
 
 if __name__ == "__main__":
     unittest.main()

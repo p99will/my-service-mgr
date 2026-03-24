@@ -49,6 +49,7 @@ The TUI has three views:
 - `3` System Services: browse existing system units
 
 System services are read-only in the TUI until you press `!` to unlock actions for the session.
+When a system action needs elevation, the app invokes `sudo` and may prompt for your password in the terminal.
 
 Non-interactive helpers:
 ```bash
@@ -79,6 +80,7 @@ Logs:
 
 System vs user mode:
 - By default (`--mode auto`), root installs to system units; non-root installs to user units.
-- You can force it with `--mode system` (requires `sudo`) or `--mode user`.
+- You can force it with `--mode system` or `--mode user`.
 - Existing-service commands use `--scope user|system`.
 - System listings are filtered to common `.service` units by default; pass `--all-existing` to show the full `systemctl list-unit-files` output for the chosen scope.
+- System mutations automatically call `sudo` when needed so you can authenticate in-place instead of rerunning the command manually.

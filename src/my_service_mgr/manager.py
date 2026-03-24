@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -147,8 +148,6 @@ def _default_template_scope(mode: str, dry_run: bool) -> str:
     if mode == "auto":
         return "system" if is_root else "user"
     if mode == "system":
-        if not is_root and not dry_run:
-            raise ElevationRequired("Systemd system units require root. Re-run with `sudo` or use `--mode user`.")
         return "system"
     if mode == "user":
         return "user"
@@ -179,10 +178,37 @@ def _run(
     *,
     logger: logging.Logger,
     unit_name: str | None = None,
+    use_sudo: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    cmd = systemctl_base + args
+    cmd = (["sudo"] if use_sudo else []) + systemctl_base + args
     start = time.time()
     proc = subprocess.run(cmd, check=False, text=True, capture_output=True)
+    elapsed_ms = int((time.time() - start) * 1000)
+
+    prefix = f"[{unit_name}] " if unit_name else ""
+    if proc.returncode == 0:
+        logger.info("%scommand ok: %s (elapsed=%sms)", prefix, " ".join(cmd), elapsed_ms)
+    else:
+        logger.error(
+            "%scommand failed rc=%s: %s\nstdout:\n%s\nstderr:\n%s",
+            prefix,
+            proc.returncode,
+            " ".join(cmd),
+            (proc.stdout or "").strip(),
+            (proc.stderr or "").strip(),
+        )
+    return proc
+
+
+def _run_command(
+    cmd: list[str],
+    *,
+    logger: logging.Logger,
+    unit_name: str | None = None,
+    input_text: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    start = time.time()
+    proc = subprocess.run(cmd, check=False, text=True, capture_output=True, input=input_text)
     elapsed_ms = int((time.time() - start) * 1000)
 
     prefix = f"[{unit_name}] " if unit_name else ""
@@ -335,6 +361,74 @@ class ServiceManager:
     def _ctx(self, scope: str | None) -> SystemdContext:
         selected_scope = scope or self.template_scope
         return self.contexts[selected_scope]
+
+    def _use_sudo(self, scope: str) -> bool:
+        return scope == "system" and os.geteuid() != 0 and not self.dry_run
+
+    def _ensure_dir(self, path: Path, *, ctx: SystemdContext, unit_name: str) -> None:
+        if self._use_sudo(ctx.scope):
+            proc = _run_command(["sudo", "mkdir", "-p", str(path)], logger=self.logger, unit_name=unit_name)
+            if proc.returncode != 0:
+                err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error"
+                raise RuntimeError(f"Failed to create directory {path}: {err}")
+            return
+        path.mkdir(parents=True, exist_ok=True)
+
+    def _install_template_file(
+        self,
+        *,
+        source_path: Path | None,
+        content: str | None,
+        dest_path: Path,
+        mode: int,
+        ctx: SystemdContext,
+        unit_name: str,
+    ) -> None:
+        if self._use_sudo(ctx.scope):
+            if source_path is not None:
+                proc = _run_command(
+                    ["sudo", "install", "-D", "-m", f"{mode:o}", str(source_path), str(dest_path)],
+                    logger=self.logger,
+                    unit_name=unit_name,
+                )
+                if proc.returncode != 0:
+                    err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error"
+                    raise RuntimeError(f"Failed to install {dest_path}: {err}")
+                return
+
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as handle:
+                handle.write(content or "")
+                temp_path = Path(handle.name)
+            try:
+                proc = _run_command(
+                    ["sudo", "install", "-D", "-m", f"{mode:o}", str(temp_path), str(dest_path)],
+                    logger=self.logger,
+                    unit_name=unit_name,
+                )
+                if proc.returncode != 0:
+                    err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error"
+                    raise RuntimeError(f"Failed to install {dest_path}: {err}")
+            finally:
+                temp_path.unlink(missing_ok=True)
+            return
+
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        if source_path is not None:
+            shutil.copy2(source_path, dest_path)
+            dest_path.chmod(mode)
+            return
+        dest_path.write_text(content or "", encoding="utf-8")
+        dest_path.chmod(mode)
+
+    def _remove_path(self, path: Path, *, ctx: SystemdContext, unit_name: str) -> None:
+        if self._use_sudo(ctx.scope):
+            proc = _run_command(["sudo", "rm", "-f", str(path)], logger=self.logger, unit_name=unit_name)
+            if proc.returncode != 0:
+                err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error"
+                raise RuntimeError(f"Failed to remove {path}: {err}")
+            return
+        if path.exists():
+            path.unlink()
 
     def _ensure_template_dirs(self) -> None:
         if not self.services_dir.exists():
@@ -539,16 +633,41 @@ class ServiceManager:
         self.logger.info("[%s] install paths script=%s unit=%s scope=%s", unit_name, script_dest, unit_dest, ctx.scope)
 
         try:
-            installed_script_path.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(template.resolve_script_template_path(), installed_script_path)
-            installed_script_path.chmod(0o755)
+            self._ensure_dir(installed_script_path.parent, ctx=ctx, unit_name=unit_name)
+            self._install_template_file(
+                source_path=template.resolve_script_template_path(),
+                content=None,
+                dest_path=installed_script_path,
+                mode=0o755,
+                ctx=ctx,
+                unit_name=unit_name,
+            )
 
-            ctx.unit_dir.mkdir(parents=True, exist_ok=True)
+            self._ensure_dir(ctx.unit_dir, ctx=ctx, unit_name=unit_name)
             rendered = template.render_unit_text(installed_script_path=installed_script_path)
-            installed_unit_path.write_text(rendered, encoding="utf-8")
+            self._install_template_file(
+                source_path=None,
+                content=rendered,
+                dest_path=installed_unit_path,
+                mode=0o644,
+                ctx=ctx,
+                unit_name=unit_name,
+            )
 
-            _run(ctx.systemctl_base, ["daemon-reload"], logger=self.logger, unit_name=unit_name)
-            enable_proc = _run(ctx.systemctl_base, ["enable", "--now", unit_name], logger=self.logger, unit_name=unit_name)
+            _run(
+                ctx.systemctl_base,
+                ["daemon-reload"],
+                logger=self.logger,
+                unit_name=unit_name,
+                use_sudo=self._use_sudo(ctx.scope),
+            )
+            enable_proc = _run(
+                ctx.systemctl_base,
+                ["enable", "--now", unit_name],
+                logger=self.logger,
+                unit_name=unit_name,
+                use_sudo=self._use_sudo(ctx.scope),
+            )
             if enable_proc.returncode != 0:
                 err = (enable_proc.stderr or "").strip() or (enable_proc.stdout or "").strip() or "unknown error"
                 return ActionResult(
@@ -655,13 +774,23 @@ class ServiceManager:
         self.logger.info("[%s] uninstall paths script=%s unit=%s scope=%s", unit_name, script_dest, unit_dest, ctx.scope)
 
         try:
-            _run(ctx.systemctl_base, ["disable", "--now", unit_name], logger=self.logger, unit_name=unit_name)
-            if installed_unit_path.exists():
-                installed_unit_path.unlink()
+            _run(
+                ctx.systemctl_base,
+                ["disable", "--now", unit_name],
+                logger=self.logger,
+                unit_name=unit_name,
+                use_sudo=self._use_sudo(ctx.scope),
+            )
+            self._remove_path(installed_unit_path, ctx=ctx, unit_name=unit_name)
 
-            _run(ctx.systemctl_base, ["daemon-reload"], logger=self.logger, unit_name=unit_name)
-            if installed_script_path.exists():
-                installed_script_path.unlink()
+            _run(
+                ctx.systemctl_base,
+                ["daemon-reload"],
+                logger=self.logger,
+                unit_name=unit_name,
+                use_sudo=self._use_sudo(ctx.scope),
+            )
+            self._remove_path(installed_script_path, ctx=ctx, unit_name=unit_name)
 
             _, enabled, _ = self._installed_state(unit_name, scope=ctx.scope)
             if enabled == "enabled":
@@ -735,7 +864,13 @@ class ServiceManager:
                 source="existing",
             )
 
-        proc = _run(ctx.systemctl_base, args, logger=self.logger, unit_name=unit_name)
+        proc = _run(
+            ctx.systemctl_base,
+            args,
+            logger=self.logger,
+            unit_name=unit_name,
+            use_sudo=self._use_sudo(scope),
+        )
         if proc.returncode != 0:
             err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error"
             return ActionResult(
