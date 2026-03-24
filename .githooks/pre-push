@@ -15,16 +15,10 @@ print(match.group(1))
 PY
 )"
 
-if git tag --points-at HEAD | grep -qx "v${current_version}"; then
-  exit 0
+if ! git tag --points-at HEAD | grep -qx "v${current_version}"; then
+  echo "pre-push: warning: HEAD is missing tag v${current_version}. Ensure .githooks is configured and commit again if needed." >&2
 fi
 
-if [[ -n "$(git status --short)" ]]; then
-  echo "pre-push: worktree must be clean before automatic version bumping." >&2
-  exit 1
+if [[ "$(git config --get push.followTags || true)" != "true" ]]; then
+  echo "pre-push: warning: push.followTags is not enabled, so tags may not be pushed automatically." >&2
 fi
-
-python3 scripts/bump_version.py
-
-echo "pre-push: version bumped and tag created. Run 'git push --follow-tags' again to push the new commit and tag." >&2
-exit 1

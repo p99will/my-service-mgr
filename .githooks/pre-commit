@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+if git diff --cached -U0 -- pyproject.toml src/my_service_mgr/__init__.py | grep -Eq '^[+-](version = "|__version__ = ")'; then
+  exit 0
+fi
+
+python3 scripts/bump_version.py --stage-only

@@ -14,10 +14,9 @@ source .venv/bin/activate
 ```
 
 `./install.sh` creates or reuses `.venv`, installs the required packaging tools,
-installs the
-project in editable mode, and configures `git` to use `.githooks/` by default.
-Pass `--recreate-venv` for a clean environment or `--no-hooks` to skip git hook
-configuration.
+installs the project in editable mode, and configures `git` to use
+`.githooks/` plus `push.followTags=true` by default. Pass `--recreate-venv` for
+a clean environment or `--no-hooks` to skip git hook configuration.
 
 ## Verify the package
 
@@ -40,15 +39,16 @@ python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 ## Versioning
 
 - The app version is stored in `pyproject.toml` and the source fallback in `src/my_service_mgr/__init__.py`.
-- A repo `pre-push` hook bumps the patch version, creates a commit, and tags it as `vX.Y.Z`.
-- Because `pre-push` runs after Git has decided what refs to send, the hook stops that push after creating the version commit and tag.
-- After it bumps the version, rerun:
+- A repo `pre-commit` hook bumps the patch version and stages the updated files in the commit you are already making.
+- A repo `post-commit` hook tags that commit as `vX.Y.Z`.
+- `install.sh` also enables `push.followTags=true`, so normal pushes include the matching annotated tag.
+- This avoids the old `pre-push` workflow that forced a second push from Cursor.
+
+If hooks are configured, a normal push is enough:
 
 ```bash
-git push --follow-tags
+git push
 ```
-
-This also applies when pushing from Cursor's Git UI: the first push will stop after the bump/tag step, and the second push sends the new commit and tag.
 
 ## Project layout
 - `src/my_service_mgr/`: Python package code

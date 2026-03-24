@@ -62,6 +62,7 @@ fi
 
 if [[ "$CONFIGURE_HOOKS" -eq 1 && -d "$ROOT_DIR/.git" && -d "$ROOT_DIR/.githooks" ]]; then
   git config core.hooksPath .githooks
+  git config push.followTags true
 fi
 
 echo "Environment is ready."
@@ -69,4 +70,5 @@ echo "Activate with: source \"$VENV_DIR/bin/activate\""
 echo "Run with: $PYTHON_BIN -m my_service_mgr"
 if [[ "$CONFIGURE_HOOKS" -eq 1 && -d "$ROOT_DIR/.githooks" ]]; then
   echo "Git hooks path: .githooks"
+  echo "Git push.followTags: true"
 fi
