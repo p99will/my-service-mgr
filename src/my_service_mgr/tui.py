@@ -144,7 +144,7 @@ def _init_colors() -> None:
 
 
 def _visible_capacity(height: int) -> int:
-    start_row = 5
+    start_row = 6
     return max(0, height - start_row - 2)
 
 
@@ -180,6 +180,7 @@ def _draw_screen(
     system_filter_mode: str,
     search_query: str,
     *,
+    search_mode: bool,
     system_actions_unlocked: bool,
 ) -> None:
     stdscr.erase()
@@ -202,8 +203,12 @@ def _draw_screen(
         f"Search: {search_label}"
     )
     stdscr.addnstr(3, 0, _truncate_ascii(status_line, width - 1), width - 1, curses.A_DIM)
+    search_line = "Live Search: type to filter name/description  [Backspace] Delete  [Enter/Esc] Done"
+    if search_mode:
+        search_line = f"Live Search: {search_query or '(empty)'}  [Backspace] Delete  [Enter/Esc] Done"
+    stdscr.addnstr(4, 0, _truncate_ascii(search_line, width - 1), width - 1, curses.A_BOLD if search_mode else curses.A_DIM)
 
-    start_row = 5
+    start_row = 6
     max_rows = max(0, height - start_row - 2)
     if max_rows < 1:
         stdscr.refresh()
@@ -334,28 +339,6 @@ def _run_with_curses_pause(stdscr: Any, manager: ServiceManager, row: dict[str, 
     return action()
 
 
-def _prompt_search(stdscr: Any, current_query: str) -> str | None:
-    height, width = stdscr.getmaxyx()
-    prompt = "Search name/description (blank clears): "
-    initial_value = current_query
-    curses.echo()
-    curses.curs_set(1)
-    try:
-        stdscr.move(height - 1, 0)
-        stdscr.clrtoeol()
-        stdscr.addnstr(height - 1, 0, _truncate_ascii(prompt + initial_value, width - 1), width - 1, curses.A_BOLD)
-        stdscr.move(height - 1, min(len(prompt) + len(initial_value), width - 1))
-        raw = stdscr.getstr(height - 1, len(prompt), max(1, width - len(prompt) - 1))
-    except KeyboardInterrupt:
-        return None
-    finally:
-        curses.noecho()
-        curses.curs_set(0)
-    if raw is None:
-        return None
-    return raw.decode("utf-8", errors="replace").strip()
-
-
 def run_tui(manager: ServiceManager) -> None:
     def _curses_main(stdscr: Any) -> None:
         view = VIEW_TEMPLATES
@@ -365,6 +348,7 @@ def run_tui(manager: ServiceManager) -> None:
         sort_mode = SORT_NONE
         system_filter_mode = SYSTEM_FILTER_ALL
         search_query = ""
+        search_mode = False
         system_actions_unlocked = False
         services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
 
@@ -390,10 +374,29 @@ def run_tui(manager: ServiceManager) -> None:
                 sort_mode=sort_mode,
                 system_filter_mode=system_filter_mode,
                 search_query=search_query,
+                search_mode=search_mode,
                 system_actions_unlocked=system_actions_unlocked,
             )
             message = ""
             key = stdscr.getch()
+
+            if search_mode:
+                if key in (27, curses.KEY_ENTER, 10, 13):
+                    search_mode = False
+                    message = "Search applied." if search_query else "Search cleared."
+                    continue
+                if key in (curses.KEY_BACKSPACE, 127, 8):
+                    search_query = search_query[:-1]
+                elif key in (24,):  # Ctrl-X clears quickly while staying in search mode.
+                    search_query = ""
+                elif 32 <= key <= 126:
+                    search_query += chr(key)
+                else:
+                    continue
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                selected = _restore_selection(services, None, 0)
+                offset = 0
+                continue
 
             if key in (ord("q"), ord("Q")):
                 break
@@ -435,15 +438,8 @@ def run_tui(manager: ServiceManager) -> None:
                 message = f"System filter set to {_system_row_filter_label(system_filter_mode)}."
                 continue
             if key in (ord("/"), ord("?")):
-                new_query = _prompt_search(stdscr, search_query)
-                if new_query is None:
-                    message = "Search cancelled."
-                    continue
-                search_query = new_query
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
-                selected = _restore_selection(services, None, 0)
-                offset = 0
-                message = f"Search {'cleared' if not search_query else f'set to {search_query!r}'}."
+                search_mode = True
+                message = "Live search started."
                 continue
             if key in (ord("c"), ord("C")):
                 if search_query:
