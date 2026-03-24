@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -365,6 +366,59 @@ class ServiceManager:
     def _use_sudo(self, scope: str) -> bool:
         return scope == "system" and os.geteuid() != 0 and not self.dry_run
 
+    def needs_elevation(self, scope: str) -> bool:
+        return self._use_sudo(scope)
+
+    def ensure_elevation(self, scope: str) -> None:
+        if not self._use_sudo(scope):
+            return
+        subprocess.run(["sudo", "-v"], check=True, text=True)
+
+    def _snapshot_row(self, unit_name: str, *, scope: str, source: str) -> dict[str, str] | None:
+        try:
+            if source == "existing":
+                return self.get_existing_service(unit_name, scope)
+            state, enabled, active = self._installed_state(unit_name, scope=scope)
+            return {
+                "unit_name": unit_name,
+                "state": state,
+                "enabled": enabled,
+                "active": active,
+                "scope": scope,
+                "source": source,
+            }
+        except Exception:
+            self.logger.exception("snapshot failed for unit=%s scope=%s source=%s", unit_name, scope, source)
+            return None
+
+    def _log_action_event(
+        self,
+        result: ActionResult,
+        *,
+        before: dict[str, str] | None,
+        after: dict[str, str] | None,
+        command: str | None = None,
+    ) -> None:
+        before_enabled = before["enabled"] if before else "unknown"
+        before_active = before["active"] if before else "unknown"
+        after_enabled = after["enabled"] if after else "unknown"
+        after_active = after["active"] if after else "unknown"
+        self.logger.info(
+            "service_event time=%s ok=%s source=%s scope=%s action=%s unit=%s before_enabled=%s before_active=%s after_enabled=%s after_active=%s command=%s message=%s",
+            datetime.now(timezone.utc).isoformat(),
+            result.ok,
+            result.source,
+            result.scope or "",
+            result.action,
+            result.unit_name,
+            before_enabled,
+            before_active,
+            after_enabled,
+            after_active,
+            command or "",
+            result.message,
+        )
+
     def _ensure_dir(self, path: Path, *, ctx: SystemdContext, unit_name: str) -> None:
         if self._use_sudo(ctx.scope):
             proc = _run_command(["sudo", "mkdir", "-p", str(path)], logger=self.logger, unit_name=unit_name)
@@ -608,6 +662,7 @@ class ServiceManager:
         unit_name = template.unit_name
         installed_script_path = template.installed_script_path()
         installed_unit_path = template.installed_unit_path()
+        before = self._snapshot_row(unit_name, scope=ctx.scope, source="template")
 
         if self.dry_run:
             msg = (
@@ -615,7 +670,7 @@ class ServiceManager:
                 f"then run: {' '.join(ctx.systemctl_base)} enable --now {unit_name} (log: {self.log_path.name})"
             )
             self.logger.info("%s", msg)
-            return ActionResult(
+            result = ActionResult(
                 ok=True,
                 unit_name=unit_name,
                 action=action,
@@ -627,6 +682,8 @@ class ServiceManager:
                 scope=ctx.scope,
                 source="template",
             )
+            self._log_action_event(result, before=before, after=None, command=f"{' '.join(ctx.systemctl_base)} enable --now {unit_name}")
+            return result
 
         script_dest = str(installed_script_path)
         unit_dest = str(installed_unit_path)
@@ -689,7 +746,7 @@ class ServiceManager:
 
             _, enabled, _ = self._installed_state(unit_name, scope=ctx.scope)
             if enabled != "enabled":
-                return ActionResult(
+                result = ActionResult(
                     ok=False,
                     unit_name=unit_name,
                     action=action,
@@ -705,13 +762,15 @@ class ServiceManager:
                     scope=ctx.scope,
                     source="template",
                 )
+                self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=ctx.scope, source="template"), command=f"{' '.join(ctx.systemctl_base)} enable --now {unit_name}")
+                return result
 
             msg = (
                 f"Enabled {unit_name}. Copied script to {script_dest} and unit to {unit_dest}. "
                 f"(scope: {ctx.scope}, log: {self.log_path.name})"
             )
             self.logger.info("%s", msg)
-            return ActionResult(
+            result = ActionResult(
                 ok=True,
                 unit_name=unit_name,
                 action=action,
@@ -723,11 +782,13 @@ class ServiceManager:
                 scope=ctx.scope,
                 source="template",
             )
+            self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=ctx.scope, source="template"), command=f"{' '.join(ctx.systemctl_base)} enable --now {unit_name}")
+            return result
         except ElevationRequired:
             raise
         except Exception as exc:
             self.logger.exception("install exception for %s", unit_name)
-            return ActionResult(
+            result = ActionResult(
                 ok=False,
                 unit_name=unit_name,
                 action=action,
@@ -742,12 +803,15 @@ class ServiceManager:
                 scope=ctx.scope,
                 source="template",
             )
+            self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=ctx.scope, source="template"), command=f"{' '.join(ctx.systemctl_base)} enable --now {unit_name}")
+            return result
 
     def _uninstall(self, template: ServiceTemplate, ctx: SystemdContext) -> ActionResult:
         action = "disable"
         unit_name = template.unit_name
         installed_script_path = template.installed_script_path()
         installed_unit_path = template.installed_unit_path()
+        before = self._snapshot_row(unit_name, scope=ctx.scope, source="template")
 
         if self.dry_run:
             msg = (
@@ -756,7 +820,7 @@ class ServiceManager:
                 f"then remove script {installed_script_path} (log: {self.log_path.name})"
             )
             self.logger.info("%s", msg)
-            return ActionResult(
+            result = ActionResult(
                 ok=True,
                 unit_name=unit_name,
                 action=action,
@@ -768,6 +832,8 @@ class ServiceManager:
                 scope=ctx.scope,
                 source="template",
             )
+            self._log_action_event(result, before=before, after=None, command=f"{' '.join(ctx.systemctl_base)} disable --now {unit_name}")
+            return result
 
         script_dest = str(installed_script_path)
         unit_dest = str(installed_unit_path)
@@ -794,7 +860,7 @@ class ServiceManager:
 
             _, enabled, _ = self._installed_state(unit_name, scope=ctx.scope)
             if enabled == "enabled":
-                return ActionResult(
+                result = ActionResult(
                     ok=False,
                     unit_name=unit_name,
                     action=action,
@@ -810,13 +876,15 @@ class ServiceManager:
                     scope=ctx.scope,
                     source="template",
                 )
+                self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=ctx.scope, source="template"), command=f"{' '.join(ctx.systemctl_base)} disable --now {unit_name}")
+                return result
 
             msg = (
                 f"Disabled {unit_name}. Removed script {script_dest} and unit {unit_dest}. "
                 f"(scope: {ctx.scope}, log: {self.log_path.name})"
             )
             self.logger.info("%s", msg)
-            return ActionResult(
+            result = ActionResult(
                 ok=True,
                 unit_name=unit_name,
                 action=action,
@@ -828,9 +896,11 @@ class ServiceManager:
                 scope=ctx.scope,
                 source="template",
             )
+            self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=ctx.scope, source="template"), command=f"{' '.join(ctx.systemctl_base)} disable --now {unit_name}")
+            return result
         except Exception as exc:
             self.logger.exception("uninstall exception for %s", unit_name)
-            return ActionResult(
+            result = ActionResult(
                 ok=False,
                 unit_name=unit_name,
                 action=action,
@@ -845,16 +915,19 @@ class ServiceManager:
                 scope=ctx.scope,
                 source="template",
             )
+            self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=ctx.scope, source="template"), command=f"{' '.join(ctx.systemctl_base)} disable --now {unit_name}")
+            return result
 
     def _existing_action(self, unit_name: str, action: str, args: list[str], scope: str) -> ActionResult:
         ctx = self._ctx(scope)
         unit_name = _normalize_unit_name(unit_name)
         command_display = " ".join(ctx.systemctl_base + args)
+        before = self._snapshot_row(unit_name, scope=scope, source="existing")
 
         if self.dry_run:
             msg = f"[dry-run] Would run: {command_display} (log: {self.log_path.name})"
             self.logger.info("%s", msg)
-            return ActionResult(
+            result = ActionResult(
                 ok=True,
                 unit_name=unit_name,
                 action=action,
@@ -863,6 +936,8 @@ class ServiceManager:
                 scope=scope,
                 source="existing",
             )
+            self._log_action_event(result, before=before, after=None, command=command_display)
+            return result
 
         proc = _run(
             ctx.systemctl_base,
@@ -873,7 +948,7 @@ class ServiceManager:
         )
         if proc.returncode != 0:
             err = (proc.stderr or "").strip() or (proc.stdout or "").strip() or "unknown error"
-            return ActionResult(
+            result = ActionResult(
                 ok=False,
                 unit_name=unit_name,
                 action=action,
@@ -883,10 +958,12 @@ class ServiceManager:
                 scope=scope,
                 source="existing",
             )
+            self._log_action_event(result, before=before, after=self._snapshot_row(unit_name, scope=scope, source="existing"), command=command_display)
+            return result
 
         row = self.get_existing_service(unit_name, scope)
         msg = f"{_past_tense(action)} {unit_name} in {scope} scope. enabled={row['enabled']} active={row['active']} (log: {self.log_path.name})"
-        return ActionResult(
+        result = ActionResult(
             ok=True,
             unit_name=unit_name,
             action=action,
@@ -895,3 +972,5 @@ class ServiceManager:
             scope=scope,
             source="existing",
         )
+        self._log_action_event(result, before=before, after=row, command=command_display)
+        return result

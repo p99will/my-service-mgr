@@ -30,6 +30,18 @@ python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 
 - `./build.sh`: creates `.venv` if needed, upgrades `pip`, and installs the app in editable mode
 - `./uninstall.sh`: uninstalls `my-service-mgr` from the current Python environment
+- `./build.sh` also configures `git` to use the repo's `.githooks/` directory
+
+## Versioning
+
+- The app version is stored in `pyproject.toml` and the source fallback in `src/my_service_mgr/__init__.py`.
+- A repo `pre-push` hook bumps the patch version, creates a commit, and tags it as `vX.Y.Z`.
+- Because `pre-push` runs after Git has decided what refs to send, the hook stops that push after creating the version commit and tag.
+- After it bumps the version, rerun:
+
+```bash
+git push --follow-tags
+```
 
 ## Project layout
 - `src/my_service_mgr/`: Python package code

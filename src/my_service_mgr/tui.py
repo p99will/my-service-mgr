@@ -15,6 +15,8 @@ VIEW_TITLES = {
     VIEW_USER: "Personal Services",
     VIEW_SYSTEM: "System Services",
 }
+SYSTEM_FILTER_ALL = "all"
+SYSTEM_FILTER_CURATED = "curated"
 SORT_NONE = "default"
 SORT_STATUS = "status"
 SORT_ENABLED = "enabled"
@@ -77,13 +79,17 @@ def _sort_services(services: list[dict[str, str]], sort_mode: str) -> list[dict[
     return [row for _, row in indexed]
 
 
-def _load_services(manager: ServiceManager, view: str, sort_mode: str) -> list[dict[str, str]]:
+def _system_row_filter_label(system_filter_mode: str) -> str:
+    return "all" if system_filter_mode == SYSTEM_FILTER_ALL else "curated"
+
+
+def _load_services(manager: ServiceManager, view: str, sort_mode: str, system_filter_mode: str) -> list[dict[str, str]]:
     if view == VIEW_TEMPLATES:
         services = manager.list_service_templates_with_status()
     elif view == VIEW_USER:
         services = manager.list_existing_services("user", filtered=False)
     else:
-        services = manager.list_existing_services("system", filtered=True)
+        services = manager.list_existing_services("system", filtered=system_filter_mode == SYSTEM_FILTER_CURATED)
     return _sort_services(services, sort_mode)
 
 
@@ -122,7 +128,7 @@ def _init_colors() -> None:
 
 
 def _visible_capacity(height: int) -> int:
-    start_row = 3
+    start_row = 5
     return max(0, height - start_row - 2)
 
 
@@ -145,6 +151,7 @@ def _draw_screen(
     offset: int,
     message: str,
     sort_mode: str,
+    system_filter_mode: str,
     *,
     system_actions_unlocked: bool,
 ) -> None:
@@ -158,15 +165,14 @@ def _draw_screen(
     title = "my-service-mgr [" + " | ".join(tabs) + "]"
     stdscr.addnstr(0, 0, _truncate_ascii(title, width - 1), width - 1, curses.A_BOLD)
 
-    subtitle = (
-        "Arrows move  Space/Enter toggle enable  s start/stop  r restart  d details  "
-        "t sort status  e sort enabled  ! unlock system  q quit"
-    )
-    stdscr.addnstr(1, 0, _truncate_ascii(subtitle, width - 1), width - 1, curses.A_DIM)
-    sort_msg = f"Sort: {SORT_LABELS[sort_mode]}"
-    stdscr.addnstr(2, 0, _truncate_ascii(sort_msg, width - 1), width - 1, curses.A_DIM)
+    primary_keys = "[Arrows] Move  [Enter/Space] Toggle  [S] Start/Stop  [R] Restart  [D] Details"
+    secondary_keys = "[1/2/3] View  [Tab] Next View  [T] Sort Status  [E] Sort Enabled  [F] System Filter  [!] Unlock System  [Q] Quit"
+    stdscr.addnstr(1, 0, _truncate_ascii(primary_keys, width - 1), width - 1, curses.A_BOLD)
+    stdscr.addnstr(2, 0, _truncate_ascii(secondary_keys, width - 1), width - 1, curses.A_DIM)
+    status_line = f"Sort: {SORT_LABELS[sort_mode]}  System Filter: {_system_row_filter_label(system_filter_mode)}"
+    stdscr.addnstr(3, 0, _truncate_ascii(status_line, width - 1), width - 1, curses.A_DIM)
 
-    start_row = 3
+    start_row = 5
     max_rows = max(0, height - start_row - 2)
     if max_rows < 1:
         stdscr.refresh()
@@ -194,7 +200,7 @@ def _draw_screen(
         active = row.get("active", "unknown")
         checkbox = "[x]" if enabled == "enabled" else "[ ]"
         main_attr = curses.A_REVERSE if absolute_idx == selected else curses.A_NORMAL
-        dim_attr = main_attr | curses.A_DIM
+        desc_attr = main_attr if absolute_idx == selected else (main_attr | curses.A_DIM)
 
         stdscr.addnstr(row_y, 0, checkbox, checkbox_width, main_attr)
         stdscr.addnstr(
@@ -210,7 +216,7 @@ def _draw_screen(
                 desc_x,
                 _truncate_ascii(row.get("description", ""), desc_draw_width),
                 desc_draw_width,
-                dim_attr,
+                desc_attr,
             )
         stdscr.addnstr(
             row_y,
@@ -282,6 +288,21 @@ def _details_selected(manager: ServiceManager, row: dict[str, str]) -> ActionRes
     return manager.status_existing_unit(row["unit_name"], row["scope"])
 
 
+def _run_with_curses_pause(stdscr: Any, manager: ServiceManager, row: dict[str, str], action: Any) -> ActionResult:
+    needs_elevation = row["scope"] == "system" and manager.needs_elevation("system")
+    if needs_elevation:
+        curses.def_prog_mode()
+        curses.endwin()
+        try:
+            print(f"sudo authentication may be required for {row['unit_name']}.")
+            manager.ensure_elevation("system")
+        finally:
+            curses.reset_prog_mode()
+            stdscr.refresh()
+            curses.doupdate()
+    return action()
+
+
 def run_tui(manager: ServiceManager) -> None:
     def _curses_main(stdscr: Any) -> None:
         view = VIEW_TEMPLATES
@@ -289,8 +310,9 @@ def run_tui(manager: ServiceManager) -> None:
         offset = 0
         message = ""
         sort_mode = SORT_NONE
+        system_filter_mode = SYSTEM_FILTER_ALL
         system_actions_unlocked = False
-        services = _load_services(manager, view, sort_mode)
+        services = _load_services(manager, view, sort_mode, system_filter_mode)
 
         _init_colors()
         curses.curs_set(0)
@@ -312,6 +334,7 @@ def run_tui(manager: ServiceManager) -> None:
                 offset=offset,
                 message=message,
                 sort_mode=sort_mode,
+                system_filter_mode=system_filter_mode,
                 system_actions_unlocked=system_actions_unlocked,
             )
             message = ""
@@ -321,13 +344,13 @@ def run_tui(manager: ServiceManager) -> None:
                 break
             if key in (ord("1"), ord("2"), ord("3")):
                 view = VIEWS[key - ord("1")]
-                services = _load_services(manager, view, sort_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode)
                 selected = 0
                 offset = 0
                 continue
             if key == 9:
                 view = VIEWS[(_view_index(view) + 1) % len(VIEWS)]
-                services = _load_services(manager, view, sort_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode)
                 selected = 0
                 offset = 0
                 continue
@@ -337,17 +360,24 @@ def run_tui(manager: ServiceManager) -> None:
                 continue
             if key in (ord("t"), ord("T")):
                 sort_mode = SORT_NONE if sort_mode == SORT_STATUS else SORT_STATUS
-                services = _load_services(manager, view, sort_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode)
                 selected = 0
                 offset = 0
                 message = f"Sort set to {SORT_LABELS[sort_mode]}."
                 continue
             if key in (ord("e"), ord("E")):
                 sort_mode = SORT_NONE if sort_mode == SORT_ENABLED else SORT_ENABLED
-                services = _load_services(manager, view, sort_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode)
                 selected = 0
                 offset = 0
                 message = f"Sort set to {SORT_LABELS[sort_mode]}."
+                continue
+            if key in (ord("f"), ord("F")):
+                system_filter_mode = SYSTEM_FILTER_CURATED if system_filter_mode == SYSTEM_FILTER_ALL else SYSTEM_FILTER_ALL
+                services = _load_services(manager, view, sort_mode, system_filter_mode)
+                selected = min(selected, len(services) - 1) if services else 0
+                offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
+                message = f"System filter set to {_system_row_filter_label(system_filter_mode)}."
                 continue
             if key == curses.KEY_UP:
                 if selected > 0:
@@ -380,17 +410,17 @@ def run_tui(manager: ServiceManager) -> None:
                 continue
             try:
                 if key in (curses.KEY_ENTER, 10, 13, ord(" ")):
-                    result = _toggle_selected(manager, view, row)
+                    result = _run_with_curses_pause(stdscr, manager, row, lambda: _toggle_selected(manager, view, row))
                 elif key in (ord("s"), ord("S")):
                     if view == VIEW_TEMPLATES:
                         message = "Start/stop is only available for existing services."
                         continue
-                    result = _start_or_stop_selected(manager, row)
+                    result = _run_with_curses_pause(stdscr, manager, row, lambda: _start_or_stop_selected(manager, row))
                 elif key in (ord("r"), ord("R")):
                     if view == VIEW_TEMPLATES:
                         message = "Restart is only available for existing services."
                         continue
-                    result = _restart_selected(manager, row)
+                    result = _run_with_curses_pause(stdscr, manager, row, lambda: _restart_selected(manager, row))
                 elif key in (ord("d"), ord("D")):
                     result = _details_selected(manager, row)
                 else:
@@ -400,7 +430,11 @@ def run_tui(manager: ServiceManager) -> None:
                 continue
 
             message = result.message
-            services = _load_services(manager, view, sort_mode)
+            current_unit_name = row["unit_name"]
+            services = _load_services(manager, view, sort_mode, system_filter_mode)
+            new_index = next((idx for idx, service in enumerate(services) if service["unit_name"] == current_unit_name), None)
+            if new_index is not None:
+                selected = new_index
             offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
 
     curses.wrapper(_curses_main)

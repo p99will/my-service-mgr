@@ -18,6 +18,11 @@ PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
 "$PYTHON_BIN" -m pip install --upgrade pip
 "$PYTHON_BIN" -m pip install -e .
 
+if [[ -d "$ROOT_DIR/.git" ]]; then
+  git config core.hooksPath .githooks
+fi
+
 echo "Environment is ready."
 echo "Activate with: source .venv/bin/activate"
 echo "Run with: my-service-mgr"
+echo "Git hooks path: .githooks"

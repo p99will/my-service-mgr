@@ -110,6 +110,9 @@ class ServiceManagerExistingServicesTests(unittest.TestCase):
             dry_run=False,
         )
         responses = [
+            CompletedProcess(args=[], returncode=0, stdout="disabled\n", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="inactive\n", stderr=""),
+            CompletedProcess(args=[], returncode=0, stdout="Demo Service\n", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="enabled\n", stderr=""),
             CompletedProcess(args=[], returncode=0, stdout="active\n", stderr=""),
@@ -120,7 +123,7 @@ class ServiceManagerExistingServicesTests(unittest.TestCase):
                 result = manager.enable_existing_unit("demo", "system")
 
         self.assertTrue(result.ok)
-        self.assertTrue(mocked_run.call_args_list[0].kwargs["use_sudo"])
+        self.assertTrue(any(call.kwargs.get("use_sudo") for call in mocked_run.call_args_list))
 
 
 if __name__ == "__main__":

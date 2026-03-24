@@ -60,6 +60,10 @@ def _print_result(result: ActionResult) -> int:
     return 1
 
 
+def _ensure_scope_ready(manager: ServiceManager, scope: str) -> None:
+    manager.ensure_elevation(scope)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
 
@@ -82,18 +86,25 @@ def main(argv: list[str] | None = None) -> int:
             _print_rows(manager.list_existing_services(args.scope, filtered=not args.all_existing), include_scope=True)
             return 0
         if args.enable:
+            _ensure_scope_ready(manager, manager.template_scope)
             return _print_result(manager.enable_by_unit_name(args.enable))
         if args.disable:
+            _ensure_scope_ready(manager, manager.template_scope)
             return _print_result(manager.disable_by_unit_name(args.disable))
         if args.enable_existing:
+            _ensure_scope_ready(manager, args.scope)
             return _print_result(manager.enable_existing_unit(args.enable_existing, args.scope))
         if args.disable_existing:
+            _ensure_scope_ready(manager, args.scope)
             return _print_result(manager.disable_existing_unit(args.disable_existing, args.scope))
         if args.start:
+            _ensure_scope_ready(manager, args.scope)
             return _print_result(manager.start_existing_unit(args.start, args.scope))
         if args.stop:
+            _ensure_scope_ready(manager, args.scope)
             return _print_result(manager.stop_existing_unit(args.stop, args.scope))
         if args.restart:
+            _ensure_scope_ready(manager, args.scope)
             return _print_result(manager.restart_existing_unit(args.restart, args.scope))
         if args.status:
             return _print_result(manager.status_existing_unit(args.status, args.scope))
