@@ -5,8 +5,12 @@ import unittest
 from my_service_mgr.tui import (
     SORT_ENABLED,
     SORT_STATUS,
+    SYSTEM_FILTER_ALL,
+    SYSTEM_FILTER_CURATED,
     _adjust_offset_for_selection,
+    _restore_selection,
     _sort_services,
+    _system_row_filter_label,
 )
 
 
@@ -41,6 +45,31 @@ class TuiHelpersTests(unittest.TestCase):
         sorted_rows = _sort_services(services, SORT_ENABLED)
 
         self.assertEqual(["a.service", "c.service", "b.service"], [row["unit_name"] for row in sorted_rows])
+
+    def test_restore_selection_prefers_same_service_after_reload(self) -> None:
+        services = [
+            {"unit_name": "first.service"},
+            {"unit_name": "enable-scrolllock-backlight.service"},
+            {"unit_name": "third.service"},
+        ]
+
+        restored = _restore_selection(services, "enable-scrolllock-backlight.service", 0)
+
+        self.assertEqual(1, restored)
+
+    def test_restore_selection_falls_back_when_service_missing(self) -> None:
+        services = [
+            {"unit_name": "first.service"},
+            {"unit_name": "second.service"},
+        ]
+
+        restored = _restore_selection(services, "missing.service", 1)
+
+        self.assertEqual(1, restored)
+
+    def test_system_filter_label(self) -> None:
+        self.assertEqual("all", _system_row_filter_label(SYSTEM_FILTER_ALL))
+        self.assertEqual("curated", _system_row_filter_label(SYSTEM_FILTER_CURATED))
 
 
 if __name__ == "__main__":

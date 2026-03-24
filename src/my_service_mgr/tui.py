@@ -143,6 +143,16 @@ def _adjust_offset_for_selection(selected: int, offset: int, max_rows: int, tota
     return min(offset, max_offset)
 
 
+def _restore_selection(services: list[dict[str, str]], current_unit_name: str | None, fallback_index: int) -> int:
+    if not services:
+        return 0
+    if current_unit_name:
+        for idx, service in enumerate(services):
+            if service["unit_name"] == current_unit_name:
+                return idx
+    return min(max(0, fallback_index), len(services) - 1)
+
+
 def _draw_screen(
     stdscr: Any,
     view: str,
@@ -200,7 +210,7 @@ def _draw_screen(
         active = row.get("active", "unknown")
         checkbox = "[x]" if enabled == "enabled" else "[ ]"
         main_attr = curses.A_REVERSE if absolute_idx == selected else curses.A_NORMAL
-        desc_attr = main_attr if absolute_idx == selected else (main_attr | curses.A_DIM)
+        desc_attr = (main_attr | curses.A_BOLD) if absolute_idx == selected else (main_attr | curses.A_DIM)
 
         stdscr.addnstr(row_y, 0, checkbox, checkbox_width, main_attr)
         stdscr.addnstr(
@@ -375,7 +385,7 @@ def run_tui(manager: ServiceManager) -> None:
             if key in (ord("f"), ord("F")):
                 system_filter_mode = SYSTEM_FILTER_CURATED if system_filter_mode == SYSTEM_FILTER_ALL else SYSTEM_FILTER_ALL
                 services = _load_services(manager, view, sort_mode, system_filter_mode)
-                selected = min(selected, len(services) - 1) if services else 0
+                selected = _restore_selection(services, None, selected)
                 offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
                 message = f"System filter set to {_system_row_filter_label(system_filter_mode)}."
                 continue
@@ -432,9 +442,7 @@ def run_tui(manager: ServiceManager) -> None:
             message = result.message
             current_unit_name = row["unit_name"]
             services = _load_services(manager, view, sort_mode, system_filter_mode)
-            new_index = next((idx for idx, service in enumerate(services) if service["unit_name"] == current_unit_name), None)
-            if new_index is not None:
-                selected = new_index
+            selected = _restore_selection(services, current_unit_name, selected)
             offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
 
     curses.wrapper(_curses_main)

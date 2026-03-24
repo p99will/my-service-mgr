@@ -62,6 +62,16 @@ The TUI has three views:
 
 System services are read-only in the TUI until you press `!` to unlock actions for the session.
 When a system action needs elevation, the app invokes `sudo` and may prompt for your password in the terminal.
+Useful TUI controls:
+- `Enter` or `Space`: enable/disable the selected service
+- `S`: start or stop the selected existing service
+- `R`: restart the selected existing service
+- `D`: show details for the selected service
+- `T`: sort by status
+- `E`: sort by enabled state
+- `F`: toggle the system-service list between `all` and `curated`
+
+The System view now defaults to `all`, so disabled inactive services remain discoverable after you toggle them off.
 
 Non-interactive helpers:
 ```bash
