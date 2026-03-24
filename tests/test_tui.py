@@ -8,6 +8,7 @@ from my_service_mgr.tui import (
     SYSTEM_FILTER_ALL,
     SYSTEM_FILTER_CURATED,
     _adjust_offset_for_selection,
+    _matches_query,
     _restore_selection,
     _sort_services,
     _system_row_filter_label,
@@ -70,6 +71,21 @@ class TuiHelpersTests(unittest.TestCase):
     def test_system_filter_label(self) -> None:
         self.assertEqual("all", _system_row_filter_label(SYSTEM_FILTER_ALL))
         self.assertEqual("curated", _system_row_filter_label(SYSTEM_FILTER_CURATED))
+
+    def test_matches_query_on_unit_name(self) -> None:
+        row = {"unit_name": "enable-scrolllock-backlight.service", "description": "Enable keyboard LED after login"}
+
+        self.assertTrue(_matches_query(row, "scrolllock"))
+
+    def test_matches_query_on_description(self) -> None:
+        row = {"unit_name": "custom-light.service", "description": "Enable keyboard LED after login"}
+
+        self.assertTrue(_matches_query(row, "keyboard led"))
+
+    def test_matches_query_blank_returns_true(self) -> None:
+        row = {"unit_name": "custom-light.service", "description": "Enable keyboard LED after login"}
+
+        self.assertTrue(_matches_query(row, ""))
 
 
 if __name__ == "__main__":

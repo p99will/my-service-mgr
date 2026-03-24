@@ -79,17 +79,33 @@ def _sort_services(services: list[dict[str, str]], sort_mode: str) -> list[dict[
     return [row for _, row in indexed]
 
 
+def _matches_query(row: dict[str, str], query: str) -> bool:
+    normalized = query.strip().lower()
+    if not normalized:
+        return True
+    unit_name = row.get("unit_name", "").lower()
+    description = row.get("description", "").lower()
+    return normalized in unit_name or normalized in description
+
+
 def _system_row_filter_label(system_filter_mode: str) -> str:
     return "all" if system_filter_mode == SYSTEM_FILTER_ALL else "curated"
 
 
-def _load_services(manager: ServiceManager, view: str, sort_mode: str, system_filter_mode: str) -> list[dict[str, str]]:
+def _load_services(
+    manager: ServiceManager,
+    view: str,
+    sort_mode: str,
+    system_filter_mode: str,
+    search_query: str,
+) -> list[dict[str, str]]:
     if view == VIEW_TEMPLATES:
         services = manager.list_service_templates_with_status()
     elif view == VIEW_USER:
         services = manager.list_existing_services("user", filtered=False)
     else:
         services = manager.list_existing_services("system", filtered=system_filter_mode == SYSTEM_FILTER_CURATED)
+    services = [row for row in services if _matches_query(row, search_query)]
     return _sort_services(services, sort_mode)
 
 
@@ -162,6 +178,7 @@ def _draw_screen(
     message: str,
     sort_mode: str,
     system_filter_mode: str,
+    search_query: str,
     *,
     system_actions_unlocked: bool,
 ) -> None:
@@ -176,10 +193,14 @@ def _draw_screen(
     stdscr.addnstr(0, 0, _truncate_ascii(title, width - 1), width - 1, curses.A_BOLD)
 
     primary_keys = "[Arrows] Move  [Enter/Space] Toggle  [S] Start/Stop  [R] Restart  [D] Details"
-    secondary_keys = "[1/2/3] View  [Tab] Next View  [T] Sort Status  [E] Sort Enabled  [F] System Filter  [!] Unlock System  [Q] Quit"
+    secondary_keys = "[1/2/3] View  [Tab] Next View  [/] Search  [C] Clear Search  [T] Sort Status  [E] Sort Enabled  [F] System Filter  [!] Unlock System  [Q] Quit"
     stdscr.addnstr(1, 0, _truncate_ascii(primary_keys, width - 1), width - 1, curses.A_BOLD)
     stdscr.addnstr(2, 0, _truncate_ascii(secondary_keys, width - 1), width - 1, curses.A_DIM)
-    status_line = f"Sort: {SORT_LABELS[sort_mode]}  System Filter: {_system_row_filter_label(system_filter_mode)}"
+    search_label = search_query if search_query else "off"
+    status_line = (
+        f"Sort: {SORT_LABELS[sort_mode]}  System Filter: {_system_row_filter_label(system_filter_mode)}  "
+        f"Search: {search_label}"
+    )
     stdscr.addnstr(3, 0, _truncate_ascii(status_line, width - 1), width - 1, curses.A_DIM)
 
     start_row = 5
@@ -313,6 +334,28 @@ def _run_with_curses_pause(stdscr: Any, manager: ServiceManager, row: dict[str, 
     return action()
 
 
+def _prompt_search(stdscr: Any, current_query: str) -> str | None:
+    height, width = stdscr.getmaxyx()
+    prompt = "Search name/description (blank clears): "
+    initial_value = current_query
+    curses.echo()
+    curses.curs_set(1)
+    try:
+        stdscr.move(height - 1, 0)
+        stdscr.clrtoeol()
+        stdscr.addnstr(height - 1, 0, _truncate_ascii(prompt + initial_value, width - 1), width - 1, curses.A_BOLD)
+        stdscr.move(height - 1, min(len(prompt) + len(initial_value), width - 1))
+        raw = stdscr.getstr(height - 1, len(prompt), max(1, width - len(prompt) - 1))
+    except KeyboardInterrupt:
+        return None
+    finally:
+        curses.noecho()
+        curses.curs_set(0)
+    if raw is None:
+        return None
+    return raw.decode("utf-8", errors="replace").strip()
+
+
 def run_tui(manager: ServiceManager) -> None:
     def _curses_main(stdscr: Any) -> None:
         view = VIEW_TEMPLATES
@@ -321,8 +364,9 @@ def run_tui(manager: ServiceManager) -> None:
         message = ""
         sort_mode = SORT_NONE
         system_filter_mode = SYSTEM_FILTER_ALL
+        search_query = ""
         system_actions_unlocked = False
-        services = _load_services(manager, view, sort_mode, system_filter_mode)
+        services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
 
         _init_colors()
         curses.curs_set(0)
@@ -345,6 +389,7 @@ def run_tui(manager: ServiceManager) -> None:
                 message=message,
                 sort_mode=sort_mode,
                 system_filter_mode=system_filter_mode,
+                search_query=search_query,
                 system_actions_unlocked=system_actions_unlocked,
             )
             message = ""
@@ -354,13 +399,13 @@ def run_tui(manager: ServiceManager) -> None:
                 break
             if key in (ord("1"), ord("2"), ord("3")):
                 view = VIEWS[key - ord("1")]
-                services = _load_services(manager, view, sort_mode, system_filter_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 continue
             if key == 9:
                 view = VIEWS[(_view_index(view) + 1) % len(VIEWS)]
-                services = _load_services(manager, view, sort_mode, system_filter_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 continue
@@ -370,25 +415,44 @@ def run_tui(manager: ServiceManager) -> None:
                 continue
             if key in (ord("t"), ord("T")):
                 sort_mode = SORT_NONE if sort_mode == SORT_STATUS else SORT_STATUS
-                services = _load_services(manager, view, sort_mode, system_filter_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 message = f"Sort set to {SORT_LABELS[sort_mode]}."
                 continue
             if key in (ord("e"), ord("E")):
                 sort_mode = SORT_NONE if sort_mode == SORT_ENABLED else SORT_ENABLED
-                services = _load_services(manager, view, sort_mode, system_filter_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 message = f"Sort set to {SORT_LABELS[sort_mode]}."
                 continue
             if key in (ord("f"), ord("F")):
                 system_filter_mode = SYSTEM_FILTER_CURATED if system_filter_mode == SYSTEM_FILTER_ALL else SYSTEM_FILTER_ALL
-                services = _load_services(manager, view, sort_mode, system_filter_mode)
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
                 selected = _restore_selection(services, None, selected)
                 offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
                 message = f"System filter set to {_system_row_filter_label(system_filter_mode)}."
                 continue
+            if key in (ord("/"), ord("?")):
+                new_query = _prompt_search(stdscr, search_query)
+                if new_query is None:
+                    message = "Search cancelled."
+                    continue
+                search_query = new_query
+                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                selected = _restore_selection(services, None, 0)
+                offset = 0
+                message = f"Search {'cleared' if not search_query else f'set to {search_query!r}'}."
+                continue
+            if key in (ord("c"), ord("C")):
+                if search_query:
+                    search_query = ""
+                    services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                    selected = _restore_selection(services, None, selected)
+                    offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
+                    message = "Search cleared."
+                    continue
             if key == curses.KEY_UP:
                 if selected > 0:
                     selected -= 1
@@ -441,7 +505,7 @@ def run_tui(manager: ServiceManager) -> None:
 
             message = result.message
             current_unit_name = row["unit_name"]
-            services = _load_services(manager, view, sort_mode, system_filter_mode)
+            services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
             selected = _restore_selection(services, current_unit_name, selected)
             offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
 

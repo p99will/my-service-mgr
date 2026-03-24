@@ -67,6 +67,8 @@ Useful TUI controls:
 - `S`: start or stop the selected existing service
 - `R`: restart the selected existing service
 - `D`: show details for the selected service
+- `/`: search the current view by service name or description
+- `C`: clear the active search
 - `T`: sort by status
 - `E`: sort by enabled state
 - `F`: toggle the system-service list between `all` and `curated`
