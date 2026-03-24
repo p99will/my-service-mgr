@@ -21,6 +21,16 @@ python -m pip install -e .
 python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 ```
 
+## Helper scripts
+
+```bash
+./build.sh
+./uninstall.sh
+```
+
+- `./build.sh`: builds source and wheel artifacts with the repo's `.venv` if present
+- `./uninstall.sh`: uninstalls `my-service-mgr` from the current Python environment
+
 ## Project layout
 - `src/my_service_mgr/`: Python package code
 - `scripts/`: helper scripts you want to keep in-repo
@@ -33,11 +43,22 @@ From the repo root, run the arrow-based TUI (requires a TTY):
 python3 -m my_service_mgr
 ```
 
+The TUI has three views:
+- `1` Templates: install/remove services from `services/` and `scripts/`
+- `2` Personal Services: manage existing user units
+- `3` System Services: browse existing system units
+
+System services are read-only in the TUI until you press `!` to unlock actions for the session.
+
 Non-interactive helpers:
 ```bash
 python3 -m my_service_mgr --list
 python3 -m my_service_mgr --enable dummy-alpha.service
 python3 -m my_service_mgr --disable dummy-alpha.service
+python3 -m my_service_mgr --list-existing --scope user
+python3 -m my_service_mgr --status ssh --scope system
+python3 -m my_service_mgr --restart pipewire --scope user
+python3 -m my_service_mgr --disable-existing nginx --scope system
 ```
 
 Service template convention:
@@ -59,4 +80,5 @@ Logs:
 System vs user mode:
 - By default (`--mode auto`), root installs to system units; non-root installs to user units.
 - You can force it with `--mode system` (requires `sudo`) or `--mode user`.
-
+- Existing-service commands use `--scope user|system`.
+- System listings are filtered to common `.service` units by default; pass `--all-existing` to show the full `systemctl list-unit-files` output for the chosen scope.
