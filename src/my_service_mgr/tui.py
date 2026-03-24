@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import curses
+from dataclasses import dataclass, field
 from typing import Any
 
 from .manager import ActionResult, ServiceManager
@@ -32,6 +33,32 @@ COLOR_DISABLED = 2
 COLOR_ACTIVE = 3
 COLOR_INACTIVE = 4
 COLOR_UNKNOWN = 5
+
+
+@dataclass
+class ServiceSnapshotCache:
+    """Cache fetched service rows so search filters in-memory snapshots."""
+
+    manager: ServiceManager
+    rows_by_key: dict[tuple[str, str], list[dict[str, str]]] = field(default_factory=dict)
+
+    def _key(self, view: str, system_filter_mode: str) -> tuple[str, str]:
+        return (view, system_filter_mode if view == VIEW_SYSTEM else "")
+
+    def get_rows(self, view: str, system_filter_mode: str, *, refresh: bool = False) -> list[dict[str, str]]:
+        key = self._key(view, system_filter_mode)
+        if refresh or key not in self.rows_by_key:
+            if view == VIEW_TEMPLATES:
+                rows = self.manager.list_service_templates_with_status()
+            elif view == VIEW_USER:
+                rows = self.manager.list_existing_services("user", filtered=False)
+            else:
+                rows = self.manager.list_existing_services("system", filtered=system_filter_mode == SYSTEM_FILTER_CURATED)
+            self.rows_by_key[key] = rows
+        return list(self.rows_by_key[key])
+
+    def clear(self) -> None:
+        self.rows_by_key.clear()
 
 
 def _truncate_ascii(text: str, max_len: int) -> str:
@@ -95,20 +122,17 @@ def _system_row_filter_label(system_filter_mode: str) -> str:
 
 
 def _load_services(
-    manager: ServiceManager,
+    cache: ServiceSnapshotCache,
     view: str,
     sort_mode: str,
     system_filter_mode: str,
     search_query: str,
+    *,
+    refresh: bool = False,
 ) -> list[dict[str, str]]:
     """Load rows for the active view, then apply search and sort consistently."""
 
-    if view == VIEW_TEMPLATES:
-        services = manager.list_service_templates_with_status()
-    elif view == VIEW_USER:
-        services = manager.list_existing_services("user", filtered=False)
-    else:
-        services = manager.list_existing_services("system", filtered=system_filter_mode == SYSTEM_FILTER_CURATED)
+    services = cache.get_rows(view, system_filter_mode, refresh=refresh)
     services = [row for row in services if _matches_query(row, search_query)]
     return _sort_services(services, sort_mode)
 
@@ -349,6 +373,7 @@ def run_tui(manager: ServiceManager) -> None:
     """Launch the interactive curses interface."""
 
     def _curses_main(stdscr: Any) -> None:
+        cache = ServiceSnapshotCache(manager)
         view = VIEW_TEMPLATES
         selected = 0
         offset = 0
@@ -358,7 +383,7 @@ def run_tui(manager: ServiceManager) -> None:
         search_query = ""
         search_mode = False
         system_actions_unlocked = False
-        services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+        services = _load_services(cache, view, sort_mode, system_filter_mode, search_query, refresh=True)
 
         _init_colors()
         curses.curs_set(0)
@@ -401,7 +426,7 @@ def run_tui(manager: ServiceManager) -> None:
                     search_query += chr(key)
                 else:
                     continue
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                 selected = _restore_selection(services, None, 0)
                 offset = 0
                 continue
@@ -410,13 +435,13 @@ def run_tui(manager: ServiceManager) -> None:
                 break
             if key in (ord("1"), ord("2"), ord("3")):
                 view = VIEWS[key - ord("1")]
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 continue
             if key == 9:
                 view = VIEWS[(_view_index(view) + 1) % len(VIEWS)]
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 continue
@@ -426,21 +451,21 @@ def run_tui(manager: ServiceManager) -> None:
                 continue
             if key in (ord("t"), ord("T")):
                 sort_mode = SORT_NONE if sort_mode == SORT_STATUS else SORT_STATUS
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 message = f"Sort set to {SORT_LABELS[sort_mode]}."
                 continue
             if key in (ord("e"), ord("E")):
                 sort_mode = SORT_NONE if sort_mode == SORT_ENABLED else SORT_ENABLED
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                 selected = 0
                 offset = 0
                 message = f"Sort set to {SORT_LABELS[sort_mode]}."
                 continue
             if key in (ord("f"), ord("F")):
                 system_filter_mode = SYSTEM_FILTER_CURATED if system_filter_mode == SYSTEM_FILTER_ALL else SYSTEM_FILTER_ALL
-                services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                 selected = _restore_selection(services, None, selected)
                 offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
                 message = f"System filter set to {_system_row_filter_label(system_filter_mode)}."
@@ -452,7 +477,7 @@ def run_tui(manager: ServiceManager) -> None:
             if key in (ord("c"), ord("C")):
                 if search_query:
                     search_query = ""
-                    services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+                    services = _load_services(cache, view, sort_mode, system_filter_mode, search_query)
                     selected = _restore_selection(services, None, selected)
                     offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
                     message = "Search cleared."
@@ -509,7 +534,8 @@ def run_tui(manager: ServiceManager) -> None:
 
             message = result.message
             current_unit_name = row["unit_name"]
-            services = _load_services(manager, view, sort_mode, system_filter_mode, search_query)
+            cache.clear()
+            services = _load_services(cache, view, sort_mode, system_filter_mode, search_query, refresh=True)
             selected = _restore_selection(services, current_unit_name, selected)
             offset = _adjust_offset_for_selection(selected, offset, max_rows, len(services))
 

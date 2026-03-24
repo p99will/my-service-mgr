@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import Mock
 
 from my_service_mgr.tui import (
+    ServiceSnapshotCache,
     SORT_ENABLED,
+    SORT_NONE,
     SORT_STATUS,
     SYSTEM_FILTER_ALL,
     SYSTEM_FILTER_CURATED,
     _adjust_offset_for_selection,
+    _load_services,
     _matches_query,
     _restore_selection,
     _sort_services,
@@ -16,6 +20,36 @@ from my_service_mgr.tui import (
 
 
 class TuiHelpersTests(unittest.TestCase):
+    def test_load_services_uses_cached_snapshot_during_search(self) -> None:
+        manager = Mock()
+        manager.list_existing_services.return_value = [
+            {"unit_name": "alpha.service", "description": "Alpha", "active": "active", "enabled": "enabled"},
+            {"unit_name": "beta.service", "description": "Beta", "active": "inactive", "enabled": "disabled"},
+        ]
+        cache = ServiceSnapshotCache(manager)
+
+        first_rows = _load_services(cache, "user", SORT_STATUS, SYSTEM_FILTER_ALL, "")
+        second_rows = _load_services(cache, "user", SORT_STATUS, SYSTEM_FILTER_ALL, "beta")
+
+        self.assertEqual(["alpha.service", "beta.service"], [row["unit_name"] for row in first_rows])
+        self.assertEqual(["beta.service"], [row["unit_name"] for row in second_rows])
+        manager.list_existing_services.assert_called_once_with("user", filtered=False)
+
+    def test_load_services_refresh_reloads_snapshot(self) -> None:
+        manager = Mock()
+        manager.list_service_templates_with_status.side_effect = [
+            [{"unit_name": "alpha.service", "description": "Alpha", "active": "inactive", "enabled": "disabled"}],
+            [{"unit_name": "beta.service", "description": "Beta", "active": "active", "enabled": "enabled"}],
+        ]
+        cache = ServiceSnapshotCache(manager)
+
+        first_rows = _load_services(cache, "templates", SORT_NONE, SYSTEM_FILTER_ALL, "", refresh=True)
+        second_rows = _load_services(cache, "templates", SORT_NONE, SYSTEM_FILTER_ALL, "", refresh=True)
+
+        self.assertEqual(["alpha.service"], [row["unit_name"] for row in first_rows])
+        self.assertEqual(["beta.service"], [row["unit_name"] for row in second_rows])
+        self.assertEqual(2, manager.list_service_templates_with_status.call_count)
+
     def test_adjust_offset_does_not_scroll_when_moving_within_viewport(self) -> None:
         self.assertEqual(5, _adjust_offset_for_selection(selected=6, offset=5, max_rows=4, total_rows=20))
 
