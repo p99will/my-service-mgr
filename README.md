@@ -43,6 +43,8 @@ python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 git push --follow-tags
 ```
 
+This also applies when pushing from Cursor's Git UI: the first push will stop after the bump/tag step, and the second push sends the new commit and tag.
+
 ## Project layout
 - `src/my_service_mgr/`: Python package code
 - `scripts/`: helper scripts you want to keep in-repo
