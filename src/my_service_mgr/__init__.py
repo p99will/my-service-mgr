@@ -12,5 +12,5 @@ try:
     __version__ = version("my-service-mgr")
 except PackageNotFoundError:
     # Fallback for local source usage (e.g. running without installation).
-    __version__ = "0.1.4"
+    __version__ = "0.1.5"
 
