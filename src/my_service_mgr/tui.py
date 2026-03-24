@@ -15,6 +15,8 @@ VIEW_TITLES = {
     VIEW_USER: "Personal Services",
     VIEW_SYSTEM: "System Services",
 }
+# Default to the broader system list so units remain visible after toggling
+# them off; curated mode is still one keypress away.
 SYSTEM_FILTER_ALL = "all"
 SYSTEM_FILTER_CURATED = "curated"
 SORT_NONE = "default"
@@ -99,6 +101,8 @@ def _load_services(
     system_filter_mode: str,
     search_query: str,
 ) -> list[dict[str, str]]:
+    """Load rows for the active view, then apply search and sort consistently."""
+
     if view == VIEW_TEMPLATES:
         services = manager.list_service_templates_with_status()
     elif view == VIEW_USER:
@@ -327,6 +331,8 @@ def _details_selected(manager: ServiceManager, row: dict[str, str]) -> ActionRes
 def _run_with_curses_pause(stdscr: Any, manager: ServiceManager, row: dict[str, str], action: Any) -> ActionResult:
     needs_elevation = row["scope"] == "system" and manager.needs_elevation("system")
     if needs_elevation:
+        # Drop out of curses before sudo prompts so password entry works in the
+        # real terminal, then restore the TUI afterwards.
         curses.def_prog_mode()
         curses.endwin()
         try:
@@ -340,6 +346,8 @@ def _run_with_curses_pause(stdscr: Any, manager: ServiceManager, row: dict[str, 
 
 
 def run_tui(manager: ServiceManager) -> None:
+    """Launch the interactive curses interface."""
+
     def _curses_main(stdscr: Any) -> None:
         view = VIEW_TEMPLATES
         selected = 0

@@ -15,6 +15,8 @@ from typing import Any
 
 SCRIPT_PATH_PLACEHOLDER = "__SCRIPT_PATH__"
 DEFAULT_TEMPLATE_SCOPE = "auto"
+# Keep the default system listing focused on actionable services. The TUI and
+# CLI still expose the unfiltered list when requested.
 SYSTEM_LIST_EXCLUDE_PREFIXES = ("systemd-",)
 SYSTEM_LIST_EXCLUDE_UNITS = {
     "dbus.service",
@@ -45,6 +47,8 @@ class ElevationRequired(RuntimeError):
 
 @dataclass(frozen=True)
 class ActionResult:
+    """Normalized outcome returned by CLI and TUI actions."""
+
     ok: bool
     unit_name: str
     action: str
@@ -60,6 +64,8 @@ class ActionResult:
 
 @dataclass(frozen=True)
 class SystemdContext:
+    """Filesystem and command details for one systemd scope."""
+
     scope: str
     unit_dir: Path
     bin_dir: Path
@@ -72,6 +78,8 @@ class SystemdContext:
 
 @dataclass(frozen=True)
 class ServiceTemplate:
+    """A discovered service template and its matching script source."""
+
     unit_template_path: Path
     scripts_dir: Path
     unit_install_dir: Path
@@ -127,6 +135,8 @@ class ServiceTemplate:
 
 
 def _default_log_path() -> Path:
+    """Prefer XDG state logs and fall back to the current working directory."""
+
     home = Path("~").expanduser()
     state_dir = home / ".local" / "state" / "my-service-mgr"
     log_dir = state_dir / "logs"
@@ -145,6 +155,7 @@ def _normalize_unit_name(unit_name: str) -> str:
 
 
 def _default_template_scope(mode: str, dry_run: bool) -> str:
+    del dry_run
     is_root = os.geteuid() == 0
     if mode == "auto":
         return "system" if is_root else "user"
@@ -156,6 +167,8 @@ def _default_template_scope(mode: str, dry_run: bool) -> str:
 
 
 def _context_for_scope(scope: str) -> SystemdContext:
+    """Map a scope name to install destinations and the right `systemctl` base."""
+
     if scope == "system":
         return SystemdContext(
             scope="system",
@@ -228,6 +241,8 @@ def _run_command(
 
 
 def _parse_unit_files_output(text: str) -> dict[str, str]:
+    """Parse `systemctl list-unit-files` output into enabled-state rows."""
+
     rows: dict[str, str] = {}
     for line in text.splitlines():
         stripped = line.strip()
@@ -246,6 +261,8 @@ def _parse_unit_files_output(text: str) -> dict[str, str]:
 
 
 def _parse_list_units_output(text: str) -> dict[str, dict[str, str]]:
+    """Parse `systemctl list-units` output into activity and description rows."""
+
     rows: dict[str, dict[str, str]] = {}
     for line in text.splitlines():
         stripped = line.rstrip()
@@ -319,6 +336,8 @@ def _past_tense(action: str) -> str:
 
 
 class ServiceManager:
+    """Discover template-backed services and perform systemd operations."""
+
     def __init__(
         self,
         services_dir: Path,
@@ -439,6 +458,8 @@ class ServiceManager:
         unit_name: str,
     ) -> None:
         if self._use_sudo(ctx.scope):
+            # `install -D` creates parent directories and applies the final mode
+            # in one step, which is safer for root-owned destinations.
             if source_path is not None:
                 proc = _run_command(
                     ["sudo", "install", "-D", "-m", f"{mode:o}", str(source_path), str(dest_path)],
@@ -511,6 +532,8 @@ class ServiceManager:
         if not unit_path.exists():
             return ("disabled", "disabled", "inactive")
 
+        # Only ask systemd for runtime state after confirming the template was
+        # installed into the expected scope-specific unit directory.
         enabled_proc = _run(ctx.systemctl_base, ["is-enabled", unit_name], logger=self.logger, unit_name=unit_name)
         enabled = _enabled_label((enabled_proc.stdout or "").strip())
 
@@ -540,6 +563,8 @@ class ServiceManager:
         return rows
 
     def list_existing_services(self, scope: str, *, filtered: bool = True) -> list[dict[str, str]]:
+        """Return merged unit-file and runtime rows for one scope."""
+
         ctx = self._ctx(scope)
         unit_files_proc = _run(
             ctx.systemctl_base,
@@ -701,6 +726,8 @@ class ServiceManager:
             )
 
             self._ensure_dir(ctx.unit_dir, ctx=ctx, unit_name=unit_name)
+            # Render the unit after the destination script path is finalized so
+            # `__SCRIPT_PATH__` always points at the installed executable.
             rendered = template.render_unit_text(installed_script_path=installed_script_path)
             self._install_template_file(
                 source_path=None,

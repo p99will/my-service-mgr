@@ -9,11 +9,15 @@ MIT (see `LICENSE`).
 ## Install (editable)
 
 ```bash
-python3 -m venv .venv
+./install.sh
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e .
 ```
+
+`./install.sh` creates or reuses `.venv`, installs the required packaging tools,
+installs the
+project in editable mode, and configures `git` to use `.githooks/` by default.
+Pass `--recreate-venv` for a clean environment or `--no-hooks` to skip git hook
+configuration.
 
 ## Verify the package
 
@@ -24,13 +28,14 @@ python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 ## Helper scripts
 
 ```bash
+./install.sh
 ./build.sh
 ./uninstall.sh
 ```
 
-- `./build.sh`: creates `.venv` if needed, upgrades `pip`, and installs the app in editable mode
-- `./uninstall.sh`: uninstalls `my-service-mgr` from the current Python environment
-- `./build.sh` also configures `git` to use the repo's `.githooks/` directory
+- `./install.sh`: bootstraps `.venv`, installs the app in editable mode, and configures `.githooks/`
+- `./build.sh`: runs `unittest` and builds `sdist`/`wheel` artifacts from the existing `.venv`
+- `./uninstall.sh`: removes the package from `.venv`, with optional environment/artifact cleanup
 
 ## Versioning
 
@@ -49,12 +54,13 @@ This also applies when pushing from Cursor's Git UI: the first push will stop af
 - `src/my_service_mgr/`: Python package code
 - `scripts/`: helper scripts you want to keep in-repo
 - `services/`: future service unit templates / artifacts
+- `dist/`: built source and wheel distributions
 
 ## Usage
 
 From the repo root, run the arrow-based TUI (requires a TTY):
 ```bash
-python3 -m my_service_mgr
+python -m my_service_mgr
 ```
 
 The TUI has three views:
@@ -79,13 +85,13 @@ The System view now defaults to `all`, so disabled inactive services remain disc
 
 Non-interactive helpers:
 ```bash
-python3 -m my_service_mgr --list
-python3 -m my_service_mgr --enable dummy-alpha.service
-python3 -m my_service_mgr --disable dummy-alpha.service
-python3 -m my_service_mgr --list-existing --scope user
-python3 -m my_service_mgr --status ssh --scope system
-python3 -m my_service_mgr --restart pipewire --scope user
-python3 -m my_service_mgr --disable-existing nginx --scope system
+python -m my_service_mgr --list
+python -m my_service_mgr --enable dummy-alpha.service
+python -m my_service_mgr --disable dummy-alpha.service
+python -m my_service_mgr --list-existing --scope user
+python -m my_service_mgr --status ssh --scope system
+python -m my_service_mgr --restart pipewire --scope user
+python -m my_service_mgr --disable-existing nginx --scope system
 ```
 
 Service template convention:
@@ -96,7 +102,7 @@ Service template convention:
 
 Dry-run mode (prints what it would do):
 ```bash
-python3 -m my_service_mgr --dry-run --enable dummy-alpha.service
+python -m my_service_mgr --dry-run --enable dummy-alpha.service
 ```
 
 Logs:
@@ -110,3 +116,17 @@ System vs user mode:
 - Existing-service commands use `--scope user|system`.
 - System listings are filtered to common `.service` units by default; pass `--all-existing` to show the full `systemctl list-unit-files` output for the chosen scope.
 - System mutations automatically call `sudo` when needed so you can authenticate in-place instead of rerunning the command manually.
+
+## Build and cleanup
+
+Create distribution artifacts:
+
+```bash
+./build.sh
+```
+
+Useful options:
+- `./build.sh --clean`: remove old `build/`, `dist/`, and `src/*.egg-info` first
+- `./build.sh --skip-tests`: build without the unittest preflight step
+- `./uninstall.sh --remove-artifacts`: uninstall and remove packaging artifacts
+- `./uninstall.sh --remove-venv --remove-artifacts`: remove both the virtualenv and local build output

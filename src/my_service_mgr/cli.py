@@ -9,6 +9,8 @@ from .tui import run_tui
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build CLI flags for both batch operations and the TUI entrypoint."""
+
     parser = argparse.ArgumentParser(prog="my-service-mgr", description="Manage systemd services from templates.")
     parser.add_argument(
         "--services-dir",
