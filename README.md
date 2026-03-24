@@ -28,7 +28,7 @@ python -c "import my_service_mgr; print(my_service_mgr.__version__)"
 ./uninstall.sh
 ```
 
-- `./build.sh`: builds source and wheel artifacts with the repo's `.venv` if present
+- `./build.sh`: creates `.venv` if needed, upgrades `pip`, and installs the app in editable mode
 - `./uninstall.sh`: uninstalls `my-service-mgr` from the current Python environment
 
 ## Project layout

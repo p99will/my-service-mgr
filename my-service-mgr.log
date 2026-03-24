@@ -1,5 +1,0 @@
-2026-03-24 01:44:30,637 INFO Initialized manager mode=auto dry_run=False systemd_unit_dir=/etc/systemd/system bin_dir=/usr/local/bin log=/home/p99will/github/my_github/my-service-mgr/my-service-mgr.log
-2026-03-24 01:44:36,075 INFO Initialized manager mode=auto dry_run=True systemd_unit_dir=/etc/systemd/system bin_dir=/usr/local/bin log=/home/p99will/github/my_github/my-service-mgr/my-service-mgr.log
-2026-03-24 01:44:36,075 INFO [dry-run] Would install script to /usr/local/bin/dummy-alpha.sh and unit to /etc/systemd/system/dummy-alpha.service then run: systemctl enable --now dummy-alpha.service (log: my-service-mgr.log)
-2026-03-24 01:45:11,666 INFO Initialized manager mode=auto dry_run=True systemd_unit_dir=/etc/systemd/system bin_dir=/usr/local/bin log=/home/p99will/github/my_github/my-service-mgr/my-service-mgr.log
-2026-03-24 01:45:11,666 INFO [dry-run] Would install script to /usr/local/bin/dummy-alpha.sh and unit to /etc/systemd/system/dummy-alpha.service then run: systemctl enable --now dummy-alpha.service (log: my-service-mgr.log)
